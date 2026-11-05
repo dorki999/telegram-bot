@@ -1,4 +1,2 @@
 python-telegram-bot==21.6
-git+https://github.com/alleexxeeyy/PlayerokAPI.git
-tqdm
-tls_requests
+PyPlayerokAPI
