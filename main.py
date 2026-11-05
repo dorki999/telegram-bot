@@ -13,7 +13,7 @@ from telegram.ext import (
 
 # --- НОВАЯ БИБЛИОТЕКА PLAYEROK ---
 from PyPlayerokAPI.account import AccountClient
-from PyPlayerokAPI.stream import AsyncPlayerokListener
+from PyPlayerokAPI.stream import PlayerokAccountListener
 from PyPlayerokAPI.stream.events import PlayerokEvent
 
 # --- НАСТРОЙКИ ---
