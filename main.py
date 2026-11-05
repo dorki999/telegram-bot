@@ -1,4 +1,3 @@
-
 import os
 import asyncio
 from pathlib import Path
@@ -13,8 +12,8 @@ from telegram.ext import (
 )
 
 ADMIN_ID = int(os.environ["ADMIN_ID"])
-KEYS_FILE = Path("keys.txt")
-ADDING_KEY = 1
+GMAILS_FILE = Path("gmails.txt")
+ADDING_GMAIL = 1
 lock = asyncio.Lock()
 
 
@@ -24,30 +23,61 @@ def is_admin(update: Update):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Бот выдачи игровых ключей работает! 🎮"
+        "Бот выдачи Gmail-аккаунтов работает! 📧\n\n"
+        "Команды:\n"
+        "/buy — получить Gmail-аккаунт\n"
+        "/stock — остаток (админ)\n"
+        "/add — добавить аккаунт (админ)"
     )
 
+
+# ---------- АДМИН: ДОБАВЛЕНИЕ ----------
 
 async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update):
         return ConversationHandler.END
 
-    await update.message.reply_text("Отправь игровой ключ:")
-    return ADDING_KEY
+    await update.message.reply_text(
+        "Отправь Gmail-аккаунт в формате:\n"
+        "`login@gmail.com:password`\n\n"
+        "Можно несколько — каждый с новой строки.",
+        parse_mode="Markdown",
+    )
+    return ADDING_GMAIL
 
 
-async def add_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    key = update.message.text.strip()
+async def add_gmail(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
 
-    if not key or "\n" in key:
-        await update.message.reply_text("Некорректный ключ.")
-        return ADDING_KEY
+    # Разбираем: может быть несколько строк сразу
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+
+    valid = []
+    invalid = []
+    for line in lines:
+        # простая валидация: должен быть ":" и "@"
+        if ":" in line and "@" in line and " " not in line:
+            valid.append(line)
+        else:
+            invalid.append(line)
+
+    if not valid:
+        await update.message.reply_text(
+            "❌ Некорректный формат. Нужно `login@gmail.com:password`",
+            parse_mode="Markdown",
+        )
+        return ADDING_GMAIL
 
     async with lock:
-        with KEYS_FILE.open("a", encoding="utf-8") as file:
-            file.write(key + "\n")
+        with GMAILS_FILE.open("a", encoding="utf-8") as file:
+            for acc in valid:
+                file.write(acc + "\n")
 
-    await update.message.reply_text("Ключ добавлен! ✅")
+    msg = f"✅ Добавлено аккаунтов: {len(valid)}"
+    if invalid:
+        msg += f"\n⚠️ Пропущено (неверный формат): {len(invalid)}"
+
+    await update.message.reply_text(msg)
     return ConversationHandler.END
 
 
@@ -56,39 +86,52 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
+# ---------- АДМИН: ОСТАТОК ----------
+
 async def stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update):
         return
 
     async with lock:
-        keys = KEYS_FILE.read_text(encoding="utf-8").splitlines() \
-            if KEYS_FILE.exists() else []
+        gmails = GMAILS_FILE.read_text(encoding="utf-8").splitlines() \
+            if GMAILS_FILE.exists() else []
+        gmails = [g for g in gmails if g.strip()]
 
     await update.message.reply_text(
-        f"Остаток игровых ключей: {len(keys)}"
+        f"Остаток Gmail-аккаунтов: {len(gmails)}"
     )
 
 
-async def take(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update):
-        return
+# ---------- ВЫДАЧА (покупателю) ----------
 
+async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with lock:
-        keys = KEYS_FILE.read_text(encoding="utf-8").splitlines() \
-            if KEYS_FILE.exists() else []
+        gmails = GMAILS_FILE.read_text(encoding="utf-8").splitlines() \
+            if GMAILS_FILE.exists() else []
+        gmails = [g for g in gmails if g.strip()]
 
-        if not keys:
-            await update.message.reply_text("Ключей нет!")
+        if not gmails:
+            await update.message.reply_text(
+                "❌ Товар закончился, попробуйте позже."
+            )
             return
 
-        key = keys.pop(0)
-        KEYS_FILE.write_text(
-            "\n".join(keys) + ("\n" if keys else ""),
-            encoding="utf-8"
+        account = gmails.pop(0)  # берём первый и «зачёркиваем»
+        GMAILS_FILE.write_text(
+            "\n".join(gmails) + ("\n" if gmails else ""),
+            encoding="utf-8",
         )
+        left = len(gmails)
 
-    await update.message.reply_text(f"Тестовая выдача:\n{key}")
+    await update.message.reply_text(
+        f"✅ Ваш Gmail-аккаунт:\n\n"
+        f"`{account}`\n\n"
+        f"Осталось в наличии: {left}",
+        parse_mode="Markdown",
+    )
 
+
+# ---------- ЗАПУСК ----------
 
 def main():
     token = os.environ["BOT_TOKEN"]
@@ -98,17 +141,17 @@ def main():
     conversation = ConversationHandler(
         entry_points=[CommandHandler("add", add_start)],
         states={
-            ADDING_KEY: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, add_key)
+            ADDING_GMAIL: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, add_gmail)
             ]
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("buy", buy))
     app.add_handler(conversation)
     app.add_handler(CommandHandler("stock", stock))
-    app.add_handler(CommandHandler("take", take))
 
     app.run_polling()
 
