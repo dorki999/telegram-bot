@@ -1,27 +1,30 @@
 import os
-import asyncio
 from pathlib import Path
 from telegram import Update
 from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
-    ConversationHandler,
     ContextTypes,
     filters,
 )
 
+# Загружаем ID админа (убедись, что в Railway в переменных есть ADMIN_ID)
 ADMIN_ID = int(os.environ["ADMIN_ID"])
-GMAILS_FILE = Path("gmails.txt")
-ADDING_GMAIL = 1
-lock = asyncio.Lock()
 
+# Настройка пути к файлу (используем Volume на Railway)
+volume_path = os.environ.get("RAILWAY_VOLUME_MOUNT_PATH", "/data")
+GMAILS_FILE = Path(volume_path) / "gmails.txt"
+GMAILS_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+# Флаг для ожидания ввода аккаунта
+waiting_for_gmail = {}
 
 def is_admin(update: Update):
     return update.effective_user.id == ADMIN_ID
 
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print(f"LOG: Команда /start от {update.effective_user.id}")
     await update.message.reply_text(
         "Бот выдачи Gmail-аккаунтов работает! 📧\n\n"
         "Команды:\n"
@@ -30,32 +33,37 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/add — добавить аккаунт (админ)"
     )
 
-
-# ---------- АДМИН: ДОБАВЛЕНИЕ ----------
-
+# --- ДОБАВЛЕНИЕ АККАУНТА ---
 async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print(f"LOG: Команда /add от {update.effective_user.id}")
+    
     if not is_admin(update):
-        return ConversationHandler.END
+        await update.message.reply_text("❌ У вас нет прав администратора.")
+        return
 
+    waiting_for_gmail[update.effective_user.id] = True
     await update.message.reply_text(
         "Отправь Gmail-аккаунт в формате:\n"
         "`login@gmail.com:password`\n\n"
         "Можно несколько — каждый с новой строки.",
         parse_mode="Markdown",
     )
-    return ADDING_GMAIL
 
+# --- ОБРАБОТКА ТЕКСТА (ЛОВИМ АККАУНТЫ) ---
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    
+    # Если пользователь не в режиме добавления — игнорируем текст
+    if not waiting_for_gmail.get(user_id):
+        return
 
-async def add_gmail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
-
-    # Разбираем: может быть несколько строк сразу
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-
+    
     valid = []
     invalid = []
+    
     for line in lines:
-        # простая валидация: должен быть ":" и "@"
         if ":" in line and "@" in line and " " not in line:
             valid.append(line)
         else:
@@ -63,65 +71,54 @@ async def add_gmail(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not valid:
         await update.message.reply_text(
-            "❌ Некорректный формат. Нужно `login@gmail.com:password`",
-            parse_mode="Markdown",
+            "❌ Некорректный формат. Нужно `login@gmail.com:password`\n"
+            "Попробуй еще раз или напиши /cancel для отмены.",
+            parse_mode="Markdown"
         )
-        return ADDING_GMAIL
+        return
 
-    async with lock:
-        with GMAILS_FILE.open("a", encoding="utf-8") as file:
-            for acc in valid:
-                file.write(acc + "\n")
+    # Записываем в файл
+    with GMAILS_FILE.open("a", encoding="utf-8") as file:
+        for acc in valid:
+            file.write(acc + "\n")
 
     msg = f"✅ Добавлено аккаунтов: {len(valid)}"
     if invalid:
         msg += f"\n⚠️ Пропущено (неверный формат): {len(invalid)}"
-
+    
     await update.message.reply_text(msg)
-    return ConversationHandler.END
+    
+    # Сбрасываем флаг
+    waiting_for_gmail[user_id] = False
 
-
+# --- ОТМЕНА ---
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    waiting_for_gmail[update.effective_user.id] = False
     await update.message.reply_text("Добавление отменено.")
-    return ConversationHandler.END
 
-
-# ---------- АДМИН: ОСТАТОК ----------
-
+# --- ОСТАТОК ---
 async def stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update):
         return
 
-    async with lock:
-        gmails = GMAILS_FILE.read_text(encoding="utf-8").splitlines() \
-            if GMAILS_FILE.exists() else []
-        gmails = [g for g in gmails if g.strip()]
+    gmails = GMAILS_FILE.read_text(encoding="utf-8").splitlines() if GMAILS_FILE.exists() else []
+    gmails = [g for g in gmails if g.strip()]
 
-    await update.message.reply_text(
-        f"Остаток Gmail-аккаунтов: {len(gmails)}"
-    )
+    await update.message.reply_text(f"Остаток Gmail-аккаунтов: {len(gmails)}")
 
-
-# ---------- ВЫДАЧА (покупателю) ----------
-
+# --- ВЫДАЧА ---
 async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    async with lock:
-        gmails = GMAILS_FILE.read_text(encoding="utf-8").splitlines() \
-            if GMAILS_FILE.exists() else []
-        gmails = [g for g in gmails if g.strip()]
+    gmails = GMAILS_FILE.read_text(encoding="utf-8").splitlines() if GMAILS_FILE.exists() else []
+    gmails = [g for g in gmails if g.strip()]
 
-        if not gmails:
-            await update.message.reply_text(
-                "❌ Товар закончился, попробуйте позже."
-            )
-            return
+    if not gmails:
+        await update.message.reply_text("❌ Товар закончился, попробуйте позже.")
+        return
 
-        account = gmails.pop(0)  # берём первый и «зачёркиваем»
-        GMAILS_FILE.write_text(
-            "\n".join(gmails) + ("\n" if gmails else ""),
-            encoding="utf-8",
-        )
-        left = len(gmails)
+    account = gmails.pop(0) # Берем первый и зачеркиваем
+    GMAILS_FILE.write_text("\n".join(gmails) + ("\n" if gmails else ""), encoding="utf-8")
+    
+    left = len(gmails)
 
     await update.message.reply_text(
         f"✅ Ваш Gmail-аккаунт:\n\n"
@@ -130,31 +127,23 @@ async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown",
     )
 
-
-# ---------- ЗАПУСК ----------
-
+# --- ЗАПУСК ---
 def main():
     token = os.environ["BOT_TOKEN"]
-
     app = Application.builder().token(token).build()
 
-    conversation = ConversationHandler(
-        entry_points=[CommandHandler("add", add_start)],
-        states={
-            ADDING_GMAIL: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, add_gmail)
-            ]
-        },
-        fallbacks=[CommandHandler("cancel", cancel)],
-    )
-
+    # Обработчики
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("buy", buy))
-    app.add_handler(conversation)
+    app.add_handler(CommandHandler("add", add_start))
+    app.add_handler(CommandHandler("cancel", cancel))
     app.add_handler(CommandHandler("stock", stock))
+    app.add_handler(CommandHandler("buy", buy))
+    
+    # Ловим любой текст (для добавления аккаунтов)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
+    print("Бот запущен и слушает Telegram...")
     app.run_polling()
-
 
 if __name__ == "__main__":
     main()
