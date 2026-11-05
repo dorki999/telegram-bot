@@ -1,6 +1,8 @@
 import os
 import asyncio
 import threading
+import os
+os.environ["REQUESTS_CA_BUNDLE"] = "/app/.venv/lib/python3.13/site-packages/certifi/cacert.pem"
 from pathlib import Path
 from telegram import Update
 from telegram.ext import (
