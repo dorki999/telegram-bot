@@ -23,8 +23,8 @@ ADMIN_ID = int(os.environ["ADMIN_ID"])
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 
 # ВСТАВЬ СВОЙ ТОКЕН И USER-AGENT СЮДА!
-PLAYEROK_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxZjAzNDNhNy0xZWY5LTY2YzAtZGFkMi0wMzBmZDE4ZjQ1ZmIiLCJpZGVudGl0eSI6IiIsInJvbGUiOiJVU0VSIiwic2lkIjoiMDFhMWE4ZDgtMDMzOC03MmZiLTkyODAtM2VjMjRmY2E1ODU4IiwicmV2IjoxLCJ2IjoxLCJpYXQiOjE3OTM4MzQwOTEsImV4cCI6MTgyNTM3MDA5MSwianRpIjoiN2I4YTg2MzQtZDFmZi00NzFmLTliZDMtYjk5MzExNDZhYWJkIn0.Gmw4vHjklvqpZmRnJvATyk76gFeAv3CSnSzzHr3uygc"
-PLAYEROK_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+PLAYEROK_TOKEN = "вставь свой токен сюда"
+PLAYEROK_USER_AGENT = "user-agent"
 
 # Файл для Gmail (используем Volume на Railway)
 volume_path = os.environ.get("RAILWAY_VOLUME_MOUNT_PATH", "/data")
