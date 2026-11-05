@@ -1,5 +1,20 @@
 import os
+import os
+import certifi
 
+# ПРИНУДИТЕЛЬНО УКАЗЫВАЕМ БИБЛИОТЕКЕ ПРАВИЛЬНЫЙ ПУТЬ К СЕРТИФИКАТАМ
+cert_path = certifi.where()
+os.environ["REQUESTS_CA_BUNDLE"] = cert_path
+os.environ["SSL_CERT_FILE"] = cert_path
+
+# Дополнительная страховка для библиотеки PyPlayerokAPI
+try:
+    import PyPlayerokAPI
+    # Если библиотека ищет файл внутри себя, мы можем попытаться подменить путь
+    # (это сработает, если библиотека использует переменную окружения внутри)
+    os.environ["PYPLAYEROK_CACERT"] = cert_path
+except ImportError:
+    pass
 # --- ОБХОД ОШИБКИ CACERT.PEM ---
 # Указываем библиотеке, где лежат стандартные сертификаты, чтобы она не искала их в папке PyPlayerokAPI
 os.environ["REQUESTS_CA_BUNDLE"] = "/app/.venv/lib/python3.13/site-packages/certifi/cacert.pem"
