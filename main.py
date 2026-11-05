@@ -1,8 +1,11 @@
 import os
-import asyncio
-import threading
-import os
+
+# --- ОБХОД ОШИБКИ CACERT.PEM ---
+# Указываем библиотеке, где лежат стандартные сертификаты, чтобы она не искала их в папке PyPlayerokAPI
 os.environ["REQUESTS_CA_BUNDLE"] = "/app/.venv/lib/python3.13/site-packages/certifi/cacert.pem"
+os.environ["SSL_CERT_FILE"] = "/app/.venv/lib/python3.13/site-packages/certifi/cacert.pem"
+
+import threading
 from pathlib import Path
 from telegram import Update
 from telegram.ext import (
@@ -22,9 +25,9 @@ from PyPlayerokAPI.stream.events import PlayerokEvent
 ADMIN_ID = int(os.environ["ADMIN_ID"])
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 
-# ВСТАВЬ СВОЙ ТОКЕН И USER-AGENT СЮДА!
-PLAYEROK_TOKEN = "вставь свой токен сюда"
-PLAYEROK_USER_AGENT = "user-agent"
+# Берем токен и агент из переменных окружения Railway
+PLAYEROK_TOKEN = os.environ.get("PLAYEROK_TOKEN", "")
+PLAYEROK_USER_AGENT = os.environ.get("PLAYEROK_USER_AGENT", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 
 # Файл для Gmail (используем Volume на Railway)
 volume_path = os.environ.get("RAILWAY_VOLUME_MOUNT_PATH", "/data")
@@ -38,12 +41,10 @@ def is_admin(update: Update):
     return update.effective_user.id == ADMIN_ID
 
 def take_gmail_from_file():
-    if not GMAILS_FILE.exists():
-        return None
+    if not GMAILS_FILE.exists(): return None
     gmails = GMAILS_FILE.read_text(encoding="utf-8").splitlines()
     gmails = [g for g in gmails if g.strip()]
-    if not gmails:
-        return None
+    if not gmails: return None
     account = gmails.pop(0)
     GMAILS_FILE.write_text("\n".join(gmails) + ("\n" if gmails else ""), encoding="utf-8")
     return account
@@ -55,10 +56,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update): return
     waiting_for_gmail[update.effective_user.id] = True
-    await update.message.reply_text(
-        "Отправь Gmail-аккаунт в формате:\n`login@gmail.com:password`\nМожно несколько — каждый с новой строки.",
-        parse_mode="Markdown",
-    )
+    await update.message.reply_text("Отправь Gmail в формате:\n`login@gmail.com:password`", parse_mode="Markdown")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -67,12 +65,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     valid = [line for line in lines if ":" in line and "@" in line and " " not in line]
     if not valid:
-        await update.message.reply_text("❌ Некорректный формат. Нужно `login@gmail.com:password`")
+        await update.message.reply_text("❌ Некорректный формат.")
         return
     with GMAILS_FILE.open("a", encoding="utf-8") as file:
-        for acc in valid:
-            file.write(acc + "\n")
-    await update.message.reply_text(f"✅ Добавлено аккаунтов: {len(valid)}")
+        for acc in valid: file.write(acc + "\n")
+    await update.message.reply_text(f"✅ Добавлено: {len(valid)}")
     waiting_for_gmail[user_id] = False
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -83,7 +80,7 @@ async def stock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update): return
     gmails = GMAILS_FILE.read_text(encoding="utf-8").splitlines() if GMAILS_FILE.exists() else []
     gmails = [g for g in gmails if g.strip()]
-    await update.message.reply_text(f"Остаток Gmail-аккаунтов: {len(gmails)}")
+    await update.message.reply_text(f"Остаток: {len(gmails)}")
 
 async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     account = take_gmail_from_file()
@@ -92,19 +89,16 @@ async def buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     gmails = GMAILS_FILE.read_text(encoding="utf-8").splitlines() if GMAILS_FILE.exists() else []
     left = len([g for g in gmails if g.strip()])
-    await update.message.reply_text(
-        f"✅ Ваш Gmail-аккаунт:\n\n`{account}`\n\nОсталось: {left}",
-        parse_mode="Markdown",
-    )
+    await update.message.reply_text(f"✅ Ваш Gmail:\n\n`{account}`\n\nОсталось: {left}", parse_mode="Markdown")
 
-# --- ИНТЕГРАЦИЯ С PLAYEROK (НОВАЯ БИБЛИОТЕКА) ---
+# --- ИНТЕГРАЦИЯ С PLAYEROK ---
 def playerok_listener_thread():
-    print("Запуск слушателя Playerok (PyPlayerokAPI)...")
+    print("Запуск слушателя Playerok...")
     
     async def run_listener():
         try:
             account = AccountClient(token=PLAYEROK_TOKEN, user_agent=PLAYEROK_USER_AGENT)
-            listener = AsyncPlayerokListener(account)
+            listener = PlayerokAccountListener(account)
             router = listener.router
 
             @router.on_new_deal()
@@ -115,25 +109,23 @@ def playerok_listener_thread():
                 chat_id = event.chat.id if event.chat else None
                 
                 if not chat_id:
-                    print("❌ Ошибка: не удалось получить ID чата из события.")
+                    print("❌ Ошибка: не удалось получить ID чата.")
                     return
 
                 if gmail_acc:
-                    await account.send_message(
-                        chat_id,
-                        f"🤖 Автовыдача!\nВаш Gmail: `{gmail_acc}`\n\nСмените пароль при первом входе."
-                    )
-                    print(f"✅ Аккаунт {gmail_acc} выдан в чат {chat_id}")
+                    await account.send_message(chat_id, f"🤖 Автовыдача!\nВаш Gmail: `{gmail_acc}`\n\nСмените пароль при входе.")
+                    print(f"✅ Аккаунт {gmail_acc} выдан.")
                 else:
-                    await account.send_message(chat_id, "⚠️ Товар временно закончился. Напишите продавцу.")
-                    print("❌ Ошибка: нет аккаунтов для выдачи!")
+                    await account.send_message(chat_id, "⚠️ Товар временно закончился.")
+                    print("❌ Ошибка: нет аккаунтов!")
 
             listener.start()
-            await asyncio.Event().wait() # Держим цикл живым
+            await asyncio.Event().wait() # Держим поток живым
 
         except Exception as e:
             print(f"❌ Критическая ошибка в Playerok: {e}")
 
+    import asyncio
     asyncio.run(run_listener())
 
 # --- ЗАПУСК ---
